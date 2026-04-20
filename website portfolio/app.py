@@ -259,6 +259,13 @@ def maak_taartdiagram(resultaten):
 
 
 def maak_rendement_staaf(resultaten, titel="Rendement per positie"):
+    # Posities zonder live koers weglaten (huidige_koers = 0)
+    resultaten = [r for r in resultaten if r.get("huidige_koers", 0) > 0]
+    if not resultaten:
+        fig = go.Figure()
+        fig.add_annotation(text="Geen koersdata beschikbaar", xref="paper", yref="paper",
+                           x=0.5, y=0.5, showarrow=False, font=dict(size=14, color="#aaa"))
+        return _layout(fig, titel)
     namen = [r["naam"]          for r in resultaten]
     rends = [r["rendement_pct"] for r in resultaten]
     wvs   = [r["winst_verlies"] for r in resultaten]
@@ -931,9 +938,10 @@ def update(serial, periode, benchmarks, portfolio):
     f9  = maak_heatmap(alle_p, koersen)
     f10 = maak_concentratie(alle_r)
 
-    # ── Overzichtskaarten ─────────────────────────────────────────────────────
-    tw = sum(r["huidige_waarde"] for r in alle_r)
-    ti = sum(r["investering"]    for r in alle_r)
+    # ── Overzichtskaarten (alleen posities met geldige koers) ─────────────────
+    alle_r_geldig = [r for r in alle_r if r.get("huidige_koers", 0) > 0]
+    tw = sum(r["huidige_waarde"] for r in alle_r_geldig)
+    ti = sum(r["investering"]    for r in alle_r_geldig)
     wv = tw - ti
     rend = ((tw / ti) - 1) * 100 if ti > 0 else 0
     kleur = KOOP_KLEUR if wv >= 0 else VERKOOP_KLEUR

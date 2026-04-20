@@ -44,19 +44,37 @@ ISIN_TICKER = {
     # Invesco / PowerShares
     "IE00BFMXXD54": "EQQQ.DE",
     "IE00B23LNQ02": "EQQQ.DE",
+    "IE0032077012": "EQQQ.DE",   # distributing variant
     # Xtrackers / DWS
     "LU1900195949": "XCS6.DE",
+    "LU0514695690": "XCS6.DE",   # oudere ISIN zelfde ETF
     "LU0274211480": "DBPK.DE",
     "LU0490618542": "XDWD.DE",
     # SPDR
     "IE00B3YTMJ21": "SPYD.DE",
     "IE00B6YX5D40": "SPYY.DE",
+    "IE00B6YX5C98": "SPYD.DE",
     # Amundi
     "LU1681043599": "PANX.PA",
     "FR0010315770": "CW8.PA",
-    # Diversen
+    # Diversen ETFs
     "IE00B27YCK28": "IUSA.AS",
     "IE00B52SF786": "SMEA.AS",
+    # ── US aandelen (ISIN → Yahoo ticker) ─────────────────────────────────────
+    "US3453708600": "F",          # Ford Motor Co
+    "US6245801062": "MOV",        # Movado Group
+    "US4062161017": "HAL",        # Halliburton
+    "US92556H2067": "PSKY",       # Paramount/Skydance (nu PSKY)
+    "US9245241037": "VALE",       # Vale SA (ADR) – primaire ISIN
+    "US91912E1055": "VALE",       # Vale SA (ADR) – alternatieve ISIN
+    "US38141G1040": "GS",         # Goldman Sachs (voorbeeld)
+    # ── Europese aandelen ─────────────────────────────────────────────────────
+    "NL0013654783": "PRX.AS",     # Prosus NV
+    "NL0009538784": "HEIA.AS",    # Heineken
+    "NL0010273215": "ASML.AS",    # ASML
+    # ── Obligaties: worden overgeslagen (geen yfinance-data) ──────────────────
+    # ISINs die beginnen met FR + cijfers zijn vaak Franse staatsobligaties of
+    # bedrijfsobligaties — worden apart verwerkt als _obligatie_isin
 }
 
 # Beurs-code → Yahoo Finance suffix
@@ -112,7 +130,15 @@ def _read_csv(text: str) -> pd.DataFrame:
 
 
 def _to_float(val) -> float:
-    """Zet een DEGIRO-getal-string om naar float (handelt Nederlandse notatie af)."""
+    """Zet een DEGIRO-getal-string om naar float.
+
+    DEGIRO Nederland gebruikt Europese notatie:
+      • Komma = decimaalscheiding  (69,714 → 69.714)
+      • Punt  = duizendtalsscheiding  (1.234,56 → 1234.56)
+
+    Als er alleen een komma aanwezig is (geen punt), is die komma ALTIJD
+    een decimaalscheiding — ook met 3 decimalen zoals 69,714 of 101,383.
+    """
     if val is None:
         return 0.0
     s = str(val).strip()
@@ -120,19 +146,19 @@ def _to_float(val) -> float:
     s = re.sub(r"[€$£A-Za-z\s]", "", s)
     if not s or s == "-":
         return 0.0
-    # Nederlandse notatie: 1.234,56  →  1234.56
+    # Europese notatie: 1.234,56  →  1234.56
     if "," in s and "." in s:
         if s.rindex(".") < s.rindex(","):
+            # Europees: punt = duizendtal, komma = decimaal
             s = s.replace(".", "").replace(",", ".")
         else:
+            # Amerikaans: komma = duizendtal, punt = decimaal
             s = s.replace(",", "")
     elif "," in s:
-        # Komma als decimaalscheiding als ≤2 cijfers erachter
-        parts = s.split(",")
-        if len(parts) == 2 and len(parts[1]) <= 2:
-            s = s.replace(",", ".")
-        else:
-            s = s.replace(",", "")
+        # Alleen komma → altijd decimaalscheiding in Europese notatie
+        # (bijv. "69,714" = 69.714, "101,383" = 101.383, "532,00" = 532.00)
+        s = s.replace(",", ".")
+    # Alleen punt → gewone decimaal of Amerikaanse notatie, laat staan
     try:
         return float(s)
     except ValueError:
@@ -295,28 +321,45 @@ def parse_degiro_csv(content_string: str) -> dict:
         beurs = meta["beurs"]
         ticker: str | None = None
 
+        # Obligaties herkennen aan ISIN-prefix (FR, XS, DE, etc. voor bonds)
+        # of productnamen met % (coupon) → overslaan, geen yfinance-data
+        naam_upper_check = meta["product"].upper()
+        is_bond = (
+            re.search(r"\d+[.,]\d+\s*%", naam_upper_check) is not None  # bijv. "3.7%"
+            or "BOND" in naam_upper_check
+            or "OBLIGAT" in naam_upper_check
+        )
+        if is_bond:
+            ticker_issues.append({
+                "product": meta["product"],
+                "isin":    isin,
+                "beurs":   beurs,
+                "gebruikte_ticker": None,
+                "opmerking": "Obligatie overgeslagen (geen koersdata via yfinance)",
+            })
+            continue
+
         if isin and isin in ISIN_TICKER:
             ticker = ISIN_TICKER[isin]
+        elif isin:
+            # Probeer ISIN rechtstreeks — yfinance ondersteunt sommige ISINs
+            ticker = isin
+            ticker_issues.append({
+                "product":          meta["product"],
+                "isin":             isin,
+                "beurs":            beurs,
+                "gebruikte_ticker": ticker,
+                "opmerking":        "ISIN gebruikt als ticker (niet in bekende mapping)",
+            })
         else:
-            # Probeer ISIN rechtstreeks (yfinance ondersteunt sommige ISINs)
-            if isin:
-                ticker = isin
-                ticker_issues.append({
-                    "product":     meta["product"],
-                    "isin":        isin,
-                    "beurs":       beurs,
-                    "gebruikte_ticker": ticker,
-                    "opmerking":   "ISIN gebruikt als ticker (niet gevonden in bekende mapping)",
-                })
-            else:
-                ticker_issues.append({
-                    "product": meta["product"],
-                    "isin":    "",
-                    "beurs":   beurs,
-                    "gebruikte_ticker": None,
-                    "opmerking": "Geen ISIN gevonden; positie overgeslagen",
-                })
-                continue  # Geen ticker → overslaan
+            ticker_issues.append({
+                "product":          meta["product"],
+                "isin":             "",
+                "beurs":            beurs,
+                "gebruikte_ticker": None,
+                "opmerking":        "Geen ISIN — positie overgeslagen",
+            })
+            continue  # Geen ticker → overslaan
 
         eerste_aankoop = buy_txs[0]["datum"] if buy_txs else txs_sorted[0]["datum"]
         gem_aankoop    = (cost_basis / cumul) if cumul > 0.001 else (
