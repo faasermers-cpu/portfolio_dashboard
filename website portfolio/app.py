@@ -667,7 +667,7 @@ def leeg_fig(tekst="Upload je DEGIRO-export om te beginnen", hoogte=350):
 # ── Google Analytics ──────────────────────────────────────────────────────────
 # Vervang 'G-XXXXXXXXXX' door jouw eigen GA4 Measurement ID
 # (te vinden op analytics.google.com → Admin → Data Streams → jouw stream)
-GA4_ID = "G-XXXXXXXXXX"
+GA4_ID = G-5EN7C1LQ6B
 
 GA4_SCRIPT = f"""
 window.dataLayer = window.dataLayer || [];
